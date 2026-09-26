@@ -121,6 +121,15 @@ addons/delist_fix3.py                 상장폐지 기업 복원 + 스트레스 
 
 DART API 키는 Colab 보안 비밀에 `DART_API_KEY`로 저장한다. 키를 코드나 노트북 출력에 남기지 않는다.
 
+**로컬(오프라인) 재실행**: Colab에서 받아 둔 캐시를 `data/cache/`에 두면 네트워크 없이 3~10단계와 추가 검증(`scripts/extra_checks.py`: 전체 기간 거래대금 분위, 군집·Newey-West t)을 다시 돌린다.
+
+```
+python scripts/run_local.py --period quick   # 2024-07 ~ 2026-08
+python scripts/run_local.py --period full    # 2016-01 ~ 2026-08 + 상장폐지 복원
+```
+
+필요한 파일은 `scripts/run_local.py` 맨 위 주석 참고 (`raw_*.csv` 또는 `dart_list/`, `prices_*.pkl`, `index_*.pkl`). 캐시는 git에 올리지 않는다.
+
 ## 8. 다음 단계
 
 1. **10년 전체 기간 유동성 점검**: 거래대금 분위별 매매 수익, 하위 40% 제외 결과 (6장 한계)

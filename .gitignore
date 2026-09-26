@@ -2,3 +2,4 @@ cache/
 *.pkl
 .ipynb_checkpoints/
 .env
+data/
