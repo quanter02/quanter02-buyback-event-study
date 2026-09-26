@@ -9,6 +9,8 @@
 #   prices_{START}_{END}.pkl     {'px': {종목코드: DataFrame(Close, Volume)}, 'missing': set}
 #   index_{START}_{END}.pkl      {'KOSPI': Series, 'KOSDAQ': Series}  (종가)
 #   (quick 캐시가 없으면 전체 기간 prices/index 캐시를 대신 쓴다)
+#   드라이브 원본을 그대로 쪼갠 prices_*.pkl.part00, part01 ... 과 dart_list.zip 도 된다.
+#   index 파일이 없으면 동일가중 지수로 대신한다 (README 3장 핵심 수치는 동일가중 기준이라 비교 가능).
 # 네트워크를 쓰지 않는다. 캐시에 없는 종목은 '가격없음'으로 처리된다.
 # =====================================================================
 import argparse, glob, json, os, pickle, sys, time
@@ -62,6 +64,26 @@ def _load_bundle():
     print(f"조각 {len(parts)}개에서 가격 {len(px)}종목·지수·공시 {len(b.get('dart_list', {}))}개 파일 복원")
     return px, set(b["missing"]), idx
 
+def _join_raw_parts():
+    """드라이브 원본을 변환 없이 쪼갠 조각(split -b 8m -d)을 이어 붙이고, dart_list.zip 을 푼다."""
+    import zipfile
+    for kind in ("prices", "index"):
+        target = os.path.join(CACHE, f"{kind}_{FULL_TAG}.pkl")
+        parts = sorted(glob.glob(target + ".part*"))
+        if parts and not os.path.exists(target):
+            with open(target, "wb") as f:
+                for q in parts: f.write(open(q, "rb").read())
+            print(f"{os.path.basename(target)}: 조각 {len(parts)}개 이어 붙임")
+    z = os.path.join(CACHE, "dart_list.zip")
+    if os.path.exists(z) and not glob.glob(os.path.join(CACHE, "dart_list", "list_*.csv")):
+        os.makedirs(os.path.join(CACHE, "dart_list"), exist_ok=True)
+        with zipfile.ZipFile(z) as zf:
+            for m in zf.namelist():
+                if m.endswith(".csv"):
+                    open(os.path.join(CACHE, "dart_list", os.path.basename(m)), "wb").write(zf.read(m))
+        print("dart_list.zip 풀기 완료")
+
+_join_raw_parts()
 bundle = _load_bundle()
 
 # ---- 공시 ----
@@ -96,7 +118,7 @@ if bundle:
     PX_STORE, MISSING, IDX_STORE = bundle
 else:
     px_path, idx_path = _cache("prices"), _cache("index")
-    missing_files = [p for p in (px_path, idx_path) if not os.path.exists(p)]
+    missing_files = [p for p in (px_path,) if not os.path.exists(p)]
     if missing_files:
         print("\n⚠️ 가격 캐시가 없어 여기서 멈춥니다. 필요한 파일:")
         print(f"   data/cache/bundle_{FULL_TAG}.pkl.gz.part00ofNN ...  (scripts/export_cache_colab.py 로 생성)")
@@ -104,7 +126,20 @@ else:
         sys.exit(0)
     d = pickle.load(open(px_path, "rb"))
     PX_STORE, MISSING = d["px"], set(d.get("missing", set()))
-    IDX_STORE = pickle.load(open(idx_path, "rb"))
+    IDX_STORE = pickle.load(open(idx_path, "rb")) if os.path.exists(idx_path) else None
+if IDX_STORE is None:
+    # 시가총액 지수가 없으면 step8 의 build_ew_benchmark 와 같은 방식(공시 기업 동일가중, 20종목 이상)으로 대신한다.
+    # README 3장의 핵심 수치(동일가중 대비 매매·포트폴리오)는 그대로 비교 가능하고,
+    # '지수 대비'로 나오는 3~7단계 숫자와 KOSDAQ 지수 행만 노트북과 달라진다.
+    code_mk = events.drop_duplicates("stock_code").set_index("stock_code")["market"]
+    R = pd.DataFrame({c: p["Close"].pct_change() for c, p in PX_STORE.items()}).sort_index()
+    R = R.where(R.abs() <= 0.305)
+    IDX_STORE = {}
+    for mk in events.market.unique():
+        cols = [c for c in R.columns if code_mk.get(c) == mk]
+        n = R[cols].notna().sum(axis=1)
+        IDX_STORE[mk] = 100 * (1 + R[cols].mean(axis=1).where(n >= 20).fillna(0)).cumprod()
+    print("⚠️ 지수 파일이 없어 동일가중 지수로 대신합니다 ('지수 대비' 숫자는 노트북과 다름, 동일가중 기준 결과는 비교 가능)")
 print(f"가격 캐시 {len(PX_STORE)}종목, 지수 {list(IDX_STORE)}")
 
 def load_px(code, start, end):
