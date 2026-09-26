@@ -2,3 +2,5 @@ cache/
 *.pkl
 .ipynb_checkpoints/
 .env
+data/
+__pycache__/
